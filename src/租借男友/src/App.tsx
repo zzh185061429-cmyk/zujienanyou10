@@ -20,7 +20,16 @@ import { regenerateCurrentFloor } from './utils/interaction';
 import { MessageSquare, Calendar, Users, X, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './utils';
-import { calcFittedScale } from '@util/responsive-scale';
+
+// 计算等比例缩放比：手机端缩小，PC 端保持 1
+function calcZoomScale(): number {
+  const designW = 1280;
+  const designH = 720;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const scale = Math.min(1, vw / designW, vh / designH);
+  return Math.max(0.5, scale); // 保护最小缩放 0.5
+}
 
 type Tab = 'story' | 'dispatch' | 'archive';
 
@@ -34,27 +43,12 @@ function AppContent() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
   const { isEyeCareMode, isViewingHistory, viewingFloorId, lastAssistantFloorId, goToLatest } = useGameContext();
   const { showToast } = useToast();
 
   // 检测脚本模式：通过 __TAVERN_SCRIPT_MODE__ 标记区分全屏策略和 CSS
   const isScriptMode = typeof (window as any).__TAVERN_SCRIPT_MODE__ !== 'undefined';
-
-  // 全屏等比缩放：设计参考尺寸（小于此视口时等比缩小填满屏幕）
-  const DESIGN_W = 900;
-  const DESIGN_H = 500;
-  const [fullscreenScale, setFullscreenScale] = useState(1);
-
-  // 全屏时根据视口变化动态计算缩放比
-  useEffect(() => {
-    if (!isFullscreen) { setFullscreenScale(1); return; }
-    const update = () => setFullscreenScale(calcFittedScale(DESIGN_W, DESIGN_H));
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [isFullscreen]);
-
-  const needsScale = isFullscreen && fullscreenScale < 1;
 
   // 监听全屏状态变化（用户按 Esc 退出等）— 仅前端模式需要
   useEffect(() => {
@@ -63,6 +57,14 @@ function AppContent() {
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, [isScriptMode]);
+
+  // 监听窗口大小变化，动态计算缩放比
+  useEffect(() => {
+    const updateScale = () => setZoomScale(calcZoomScale());
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, []);
 
   const toggleFullscreen = async () => {
     if (isScriptMode) {
@@ -115,17 +117,30 @@ function AppContent() {
     { id: 'archive', label: '角色图鉴', icon: Users },
   ] as const;
 
-  const content = (
+  return (
     <div 
-      className={cn(
-        "flex flex-col bg-pop-black overflow-hidden font-sans relative",
-        !needsScale && "transition-all duration-300",
-        isScriptMode
-          ? "w-full h-full"
-          : (isFullscreen ? (needsScale ? "w-full h-full" : "h-screen") : "w-full aspect-[3/4]")
-      )}
-      style={{ filter: isEyeCareMode ? 'sepia(0.2) brightness(0.9) contrast(0.95)' : 'none' }}
+      className="w-full h-full flex items-center justify-center overflow-hidden"
+      style={{ backgroundColor: '#1a1a1a' }}
     >
+      {/* 缩放容器：只改变渲染尺寸，不改变内部布局流 */}
+      <div 
+        style={{ 
+          zoom: zoomScale,
+          width: zoomScale < 1 ? '1280px' : '100%',
+          height: zoomScale < 1 ? '720px' : '100%',
+          maxWidth: '100%',
+          maxHeight: '100%',
+        }}
+      >
+        <div 
+          className={cn(
+            "flex flex-col bg-pop-black overflow-hidden font-sans relative transition-all duration-300",
+            isScriptMode
+              ? "w-full h-full"
+              : (isFullscreen ? "h-screen" : "w-full aspect-[3/4]")
+          )}
+          style={{ filter: isEyeCareMode ? 'sepia(0.2) brightness(0.9) contrast(0.95)' : 'none' }}
+        >
         
         {/* Global HUD — fold button is inside HUD left column */}
         <HUD
@@ -251,27 +266,9 @@ function AppContent() {
         <DeleteFloorsModal isOpen={isDeleteOpen} onClose={() => setIsDeleteOpen(false)} />
 
       </div>
-  );
-
-  // 全屏且视口小于设计尺寸时，用外层容器包裹并居中缩放
-  if (needsScale) {
-    return (
-      <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#1a1a2e' }}>
-        <div style={{
-          width: `${DESIGN_W}px`,
-          height: `${DESIGN_H}px`,
-          position: 'absolute',
-          left: '50%',
-          top: '50%',
-          transform: `translate(-50%, -50%) scale(${fullscreenScale})`,
-        }}>
-          {content}
-        </div>
       </div>
-    );
-  }
-
-  return content;
+    </div>
+  );
 }
 
 export default function App() {
